@@ -10,8 +10,8 @@ MSG_EFFECT = 5046509860389126442
 
 SHORT_URL = "arolinks.com"  # First verification shortener
 SHORT_API = "2b3dd0b54ab06c6c8e6cf617f20d5fff15ee1b71"
-SHORT_URL_2 = "arolinks.com"  # Second verification shortener (can be different)
-SHORT_API_2 = "2b3dd0b54ab06c6c8e6cf617f20d5fff15ee1b71"
+SHORT_URL_1 = "arolinks.com"  # Second verification shortener (can be different)
+SHORT_API_1 = "2b3dd0b54ab06c6c8e6cf617f20d5fff15ee1b71"
 SHORT_TUT = "https://t.me/How_to_Download_7x/26"
 
 # Bot Configuration
