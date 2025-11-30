@@ -1,7 +1,7 @@
 import requests
 import random
 import string
-from config import SHORT_URL, SHORT_API, MESSAGES
+from config import SHORT_URL_1, SHORT_API_1, SHORT_URL_2, SHORT_API_2, MESSAGES
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
 from pyrogram.errors.pyromod import ListenerTimeout
@@ -14,35 +14,46 @@ def generate_random_alphanumeric():
     characters = string.ascii_letters + string.digits
     return ''.join(random.choice(characters) for _ in range(8))
 
-def get_short(url, client):
-
+def get_short(url, client, verification_step: int = 1):
+    """
+    Enhanced shortener function with dual API support
+    verification_step: 1 for first verification, 2 for second verification
+    
+    Returns shortened URL if successful, None if failed (so caller can show error)
+    """
     # Check if shortner is enabled
     shortner_enabled = getattr(client, 'shortner_enabled', True)
     if not shortner_enabled:
-        return url  # Return original URL if shortner is disabled
-
-    # Step 2: Check cache
-    if url in shortened_urls_cache:
-        return shortened_urls_cache[url]
-
+        return None  # Return None if disabled, not original URL
+    
+    # Check cache
+    cache_key = f"{url}_{verification_step}"
+    if cache_key in shortened_urls_cache:
+        return shortened_urls_cache[cache_key]
+    
     try:
         alias = generate_random_alphanumeric()
-        # Use dynamic shortner settings from client if available
-        short_url = getattr(client, 'short_url', SHORT_URL)
-        short_api = getattr(client, 'short_api', SHORT_API)
+        
+        if verification_step == 2:
+            short_url = getattr(client, 'short_url_2', SHORT_URL_2)
+            short_api = getattr(client, 'short_api_2', SHORT_API_2)
+        else:  # Default to step 1
+            short_url = getattr(client, 'short_url_1', SHORT_URL_1)
+            short_api = getattr(client, 'short_api_1', SHORT_API_1)
         
         api_url = f"https://{short_url}/api?api={short_api}&url={url}&alias={alias}"
-        response = requests.get(api_url)
+        response = requests.get(api_url, timeout=10)
         rjson = response.json()
-
+        
         if rjson.get("status") == "success" and response.status_code == 200:
-            short_url = rjson.get("shortenedUrl", url)
-            shortened_urls_cache[url] = short_url
-            return short_url
+            short_url_result = rjson.get("shortenedUrl")
+            if short_url_result and (short_url_result.startswith("http://") or short_url_result.startswith("https://")):
+                shortened_urls_cache[cache_key] = short_url_result
+                return short_url_result
     except Exception as e:
         print(f"[Shortener Error] {e}")
-
-    return url  # fallback
+    
+    return None
 
 #===============================================================#
 
@@ -53,21 +64,34 @@ async def shortner_command(client: Client, message: Message):
 #===============================================================#
 
 async def shortner_panel(client, query_or_message):
-    # Get current shortner settings
-    short_url = getattr(client, 'short_url', SHORT_URL)
-    short_api = getattr(client, 'short_api', SHORT_API)
+    short_url_1 = getattr(client, 'short_url_1', SHORT_URL_1)
+    short_api_1 = getattr(client, 'short_api_1', SHORT_API_1)
+    short_url_2 = getattr(client, 'short_url_2', SHORT_URL_2)
+    short_api_2 = getattr(client, 'short_api_2', SHORT_API_2)
     tutorial_link = getattr(client, 'tutorial_link', "https://t.me/How_to_Download_7x/26")
     shortner_enabled = getattr(client, 'shortner_enabled', True)
     
-    # Check if shortner is working (only if enabled)
+    # Check if shorteners are working (only if enabled)
+    status_1 = "✗ ɴᴏᴛ ᴄᴏɴғɪɢᴜʀᴇᴅ"
+    status_2 = "✗ ɴᴏᴛ ᴄᴏɴғɪɢᴜʀᴇᴅ"
+    
     if shortner_enabled:
-        try:
-            test_response = requests.get(f"https://{short_url}/api?api={short_api}&url=https://google.com&alias=test", timeout=5)
-            status = "✓ ᴡᴏʀᴋɪɴɢ" if test_response.status_code == 200 else "✗ ɴᴏᴛ ᴡᴏʀᴋɪɴɢ"
-        except:
-            status = "✗ ɴᴏᴛ ᴡᴏʀᴋɪɴɢ"
+        if short_api_1:
+            try:
+                test_response = requests.get(f"https://{short_url_1}/api?api={short_api_1}&url=https://google.com&alias=test", timeout=5)
+                status_1 = "✓ ᴡᴏʀᴋɪɴɢ" if test_response.status_code == 200 else "✗ ɴᴏᴛ ᴡᴏʀᴋɪɴɢ"
+            except:
+                status_1 = "✗ ɴᴏᴛ ᴡᴏʀᴋɪɴɢ"
+        
+        if short_api_2:
+            try:
+                test_response = requests.get(f"https://{short_url_2}/api?api={short_api_2}&url=https://google.com&alias=test", timeout=5)
+                status_2 = "✓ ᴡᴏʀᴋɪɴɢ" if test_response.status_code == 200 else "✗ ɴᴏᴛ ᴡᴏʀᴋɪɴɢ"
+            except:
+                status_2 = "✗ ɴᴏᴛ ᴡᴏʀᴋɪɴɢ"
     else:
-        status = "✗ ᴅɪsᴀʙʟᴇᴅ"
+        status_1 = "✗ ᴅɪsᴀʙʟᴇᴅ"
+        status_2 = "✗ ᴅɪsᴀʙʟᴇᴅ"
     
     enabled_text = "✓ ᴇɴᴀʙʟᴇᴅ" if shortner_enabled else "✗ ᴅɪsᴀʙʟᴇᴅ"
     toggle_text = "✗ ᴏғғ" if shortner_enabled else "✓ ᴏɴ"
@@ -75,17 +99,25 @@ async def shortner_panel(client, query_or_message):
     msg = f"""<blockquote>✦ 𝗦𝗛𝗢𝗥𝗧𝗡𝗘𝗥 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦</blockquote>
 **<u>ᴄᴜʀʀᴇɴᴛ ꜱᴇᴛᴛɪɴɢꜱ:</u>**
 <blockquote>›› **ꜱʜᴏʀᴛɴᴇʀ ꜱᴛᴀᴛᴜꜱ:** {enabled_text}
-›› **ꜱʜᴏʀᴛɴᴇʀ ᴜʀʟ:** `{short_url}`
-›› **ꜱʜᴏʀᴛɴᴇʀ ᴀᴘɪ:** `{short_api}`</blockquote> 
-<blockquote>›› **ᴛᴜᴛᴏʀɪᴀʟ ʟɪɴᴋ:** `{tutorial_link}`
-›› **ᴀᴘɪ ꜱᴛᴀᴛᴜꜱ:** {status}</blockquote>
+
+**ғɪʀsᴛ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ:**
+›› **ᴜʀʟ:** `{short_url_1}`
+›› **ᴀᴘɪ:** `{short_api_1[:20] if short_api_1 else 'Not set'}...`
+›› **ꜱᴛᴀᴛᴜꜱ:** {status_1}
+
+**sᴇᴄᴏɴᴅ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ:**
+›› **ᴜʀʟ:** `{short_url_2}`
+›› **ᴀᴘɪ:** `{short_api_2[:20] if short_api_2 else 'Not set'}...`
+›› **ꜱᴛᴀᴛᴜꜱ:** {status_2}</blockquote>
+
+<blockquote>›› **ᴛᴜᴛᴏʀɪᴀʟ ʟɪɴᴋ:** `{tutorial_link}`</blockquote>
 
 <blockquote>**≡ ᴜꜱᴇ ᴛʜᴇ ʙᴜᴛᴛᴏɴꜱ ʙᴇʟᴏᴡ ᴛᴏ ᴄᴏɴꜰɪɢᴜʀᴇ ʏᴏᴜʀ ꜱʜᴏʀᴛɴᴇʀ ꜱᴇᴛᴛɪɴɢꜱ!**</blockquote>"""
     
     reply_markup = InlineKeyboardMarkup([
         [InlineKeyboardButton(f'• {toggle_text} ꜱʜᴏʀᴛɴᴇʀ •', 'toggle_shortner'), InlineKeyboardButton('• ᴀᴅᴅ ꜱʜᴏʀᴛɴᴇʀ •', 'add_shortner')],
         [InlineKeyboardButton('• ꜱᴇᴛ ᴛᴜᴛᴏʀɪᴀʟ ʟɪɴᴋ •', 'set_tutorial_link')],
-        [InlineKeyboardButton('• ᴛᴇꜱᴛ ꜱʜᴏʀᴛɴᴇʀ •', 'test_shortner')],
+        [InlineKeyboardButton('• ᴛᴇꜱᴛ ꜱʜᴏʀᴛɴᴇʀs •', 'test_shortner')],
         [InlineKeyboardButton('◂ ʙᴀᴄᴋ ᴛᴏ ꜱᴇᴛᴛɪɴɢꜱ', 'settings')] if hasattr(query_or_message, 'message') else []
     ])
     
@@ -98,7 +130,6 @@ async def shortner_panel(client, query_or_message):
         )
     else:
         await query_or_message.reply_photo(photo=image_url, caption=msg, reply_markup=reply_markup)
-
 
 #===============================================================#
 
@@ -138,13 +169,17 @@ async def add_shortner(client: Client, query: CallbackQuery):
     
     await query.answer()
         
-    current_url = getattr(client, 'short_url', SHORT_URL)
-    current_api = getattr(client, 'short_api', SHORT_API)
+    current_url_1 = getattr(client, 'short_url_1', SHORT_URL_1)
+    current_api_1 = getattr(client, 'short_api_1', SHORT_API_1)
+    current_url_2 = getattr(client, 'short_url_2', SHORT_URL_2)
+    current_api_2 = getattr(client, 'short_api_2', SHORT_API_2)
     
     msg = f"""<blockquote>**ꜱᴇᴛ ꜱʜᴏʀᴛɴᴇʀ ꜱᴇᴛᴛɪɴɢꜱ:**</blockquote>
 **ᴄᴜʀʀᴇɴᴛ ꜱᴇᴛᴛɪɴɢꜱ:**
-• **ᴜʀʟ:** `{current_url}`
-• **ᴀᴘɪ:** `{current_api[:20]}...`
+• **ғɪʀsᴛ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ᴜʀʟ:** `{current_url_1}`
+• **ғɪʀsᴛ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ᴀᴘɪ:** `{current_api_1[:20] if current_api_1 else 'Not set'}...`
+• **sᴇᴄᴏɴᴅ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ᴜʀʟ:** `{current_url_2}`
+• **sᴇᴄᴏɴᴅ ᴠᴇʀɪғɪᴄᴀᴛɪᴏɴ ᴀᴘɪ:** `{current_api_2[:20] if current_api_2 else 'Not set'}...`
 
 __<blockquote>**≡ ꜱᴇɴᴅ ɴᴇᴡ ꜱʜᴏʀᴛɴᴇʀ ᴜʀʟ ᴀɴᴅ ᴀᴘɪ ɪɴ ᴛʜɪꜱ ꜰᴏʀᴍᴀᴛ ɪɴ ᴛʜᴇ ɴᴇxᴛ 60 ꜱᴇᴄᴏɴᴅꜱ!**</blockquote>__
 
@@ -164,12 +199,12 @@ __<blockquote>**≡ ꜱᴇɴᴅ ɴᴇᴡ ꜱʜᴏʀᴛɴᴇʀ ᴜʀʟ ᴀɴᴅ �
             
             if new_url and '.' in new_url and new_api and len(new_api) > 10:
                 # Update both settings
-                client.short_url = new_url
-                client.short_api = new_api
+                client.short_url_1 = new_url
+                client.short_api_1 = new_api
                 
                 # Save to database
-                await client.mongodb.update_shortner_setting('short_url', new_url)
-                await client.mongodb.update_shortner_setting('short_api', new_api)
+                await client.mongodb.update_shortner_setting('short_url_1', new_url)
+                await client.mongodb.update_shortner_setting('short_api_1', new_api)
                 
                 await query.message.edit_text(f"**✓ ꜱʜᴏʀᴛɴᴇʀ ꜱᴇᴛᴛɪɴɢꜱ ᴜᴘᴅᴀᴛᴇᴅ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟʟʏ!**\n\n**ɴᴇᴡ ᴜʀʟ:** `{new_url}`\n**ɴᴇᴡ ᴀᴘɪ:** `{new_api[:20]}...`", 
                                             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('◂ ʙᴀᴄᴋ', 'shortner')]]))
@@ -228,31 +263,46 @@ async def test_shortner(client: Client, query: CallbackQuery):
         
     await query.message.edit_text("**🔄 ᴛᴇꜱᴛɪɴɢ ꜱʜᴏʀᴛɴᴇʀ...**")
     
-    short_url = getattr(client, 'short_url', SHORT_URL)
-    short_api = getattr(client, 'short_api', SHORT_API)
+    short_url_1 = getattr(client, 'short_url_1', SHORT_URL_1)
+    short_api_1 = getattr(client, 'short_api_1', SHORT_API_1)
+    short_url_2 = getattr(client, 'short_url_2', SHORT_URL_2)
+    short_api_2 = getattr(client, 'short_api_2', SHORT_API_2)
     
-    try:
-        test_url = "https://google.com"
-        alias = generate_random_alphanumeric()
-        api_url = f"https://{short_url}/api?api={short_api}&url={test_url}&alias={alias}"
-        
-        response = requests.get(api_url, timeout=10)
-        rjson = response.json()
-        
-        if rjson.get("status") == "success" and response.status_code == 200:
-            short_link = rjson.get("shortenedUrl", "")
-            msg = f"""**✅ ꜱʜᴏʀᴛɴᴇʀ ᴛᴇꜱᴛ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟ!**
-
-**ᴛᴇꜱᴛ ᴜʀʟ:** `{test_url}`
-**ꜱʜᴏʀᴛ ᴜʀʟ:** `{short_link}`
-**ʀᴇꜱᴘᴏɴꜱᴇ:** `{rjson.get('status', 'Unknown')}`"""
-        else:
-            msg = f"""**❌ ꜱʜᴏʀᴛɴᴇʀ ᴛᴇꜱᴛ ꜰᴀɪʟᴇᴅ!**
-
-**ᴇʀʀᴏʀ:** `{rjson.get('message', 'Unknown error')}`
-**ꜱᴛᴀᴛᴜꜱ ᴄᴏᴅᴇ:** `{response.status_code}`"""
+    results = []
+    
+    if short_api_1:
+        try:
+            test_url = "https://google.com"
+            alias = generate_random_alphanumeric()
+            api_url = f"https://{short_url_1}/api?api={short_api_1}&url={test_url}&alias={alias}"
             
-    except Exception as e:
-        msg = f"**❌ ꜱʜᴏʀᴛɴᴇʀ ᴛᴇꜱᴛ ꜰᴀɪʟᴇᴅ!**\n\n**ᴇʀʀᴏʀ:** `{str(e)}`"
+            response = requests.get(api_url, timeout=10)
+            rjson = response.json()
+            
+            if rjson.get("status") == "success" and response.status_code == 200:
+                short_link = rjson.get("shortenedUrl", "")
+                results.append(f"**✅ ꜱʜᴏʀᴛɴᴇʀ 1 ᴛᴇꜱᴛ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟ!**\n\n**ᴛᴇꜱᴛ ᴜʀʟ:** `{test_url}`\n**ꜱʜᴏʀᴛ ᴜʀʟ:** `{short_link}`\n**ʀᴇꜱᴘᴏɴꜱᴇ:** `{rjson.get('status', 'Unknown')}`")
+            else:
+                results.append(f"**❌ ꜱʜᴏʀᴛɴᴇʀ 1 ᴛᴇꜱᴛ ꜰᴀɪʟᴇᴅ!**\n\n**ᴇʀʀᴏʀ:** `{rjson.get('message', 'Unknown error')}`\n**ꜱᴛᴀᴛᴜꜱ ᴄᴏᴅᴇ:** `{response.status_code}`")
+        except Exception as e:
+            results.append(f"**❌ ꜱʜᴏʀᴛɴᴇʀ 1 ᴛᴇꜱᴛ ꜰᴀɪʟᴇᴅ!**\n\n**ᴇʀʀᴏʀ:** `{str(e)}`")
     
-    await query.message.edit_text(msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('◂ ʙᴀᴄᴋ', 'shortner')]]))
+    if short_api_2:
+        try:
+            test_url = "https://google.com"
+            alias = generate_random_alphanumeric()
+            api_url = f"https://{short_url_2}/api?api={short_api_2}&url={test_url}&alias={alias}"
+            
+            response = requests.get(api_url, timeout=10)
+            rjson = response.json()
+            
+            if rjson.get("status") == "success" and response.status_code == 200:
+                short_link = rjson.get("shortenedUrl", "")
+                results.append(f"\n**✅ ꜱʜᴏʀᴛɴᴇʀ 2 ᴛᴇꜱᴛ ꜱᴜᴄᴄᴇꜱꜱꜰᴜʟ!**\n\n**ᴛᴇꜱᴛ ᴜʀʟ:** `{test_url}`\n**ꜱʜᴏʀᴛ ᴜʀʟ:** `{short_link}`\n**ʀᴇꜱᴘᴏɴꜱᴇ:** `{rjson.get('status', 'Unknown')}`")
+            else:
+                results.append(f"\n**❌ ꜱʜᴏʀᴛɴᴇʀ 2 ᴛᴇꜱᴛ ꜰᴀɪʟᴇᴅ!**\n\n**ᴇʀʀᴏʀ:** `{rjson.get('message', 'Unknown error')}`\n**ꜱᴛᴀᴛᴜꜱ ᴄᴏᴅᴇ:** `{response.status_code}`")
+        except Exception as e:
+            results.append(f"\n**❌ ꜱʜᴏʀᴛɴᴇʀ 2 ᴛᴇꜱᴛ ꜰᴀɪʟᴇᴅ!**\n\n**ᴇʀʀᴏʀ:** `{str(e)}`")
+    
+    final_msg = "\n".join(results)
+    await query.message.edit_text(final_msg, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton('◂ ʙᴀᴄᴋ', 'shortner')]]))
