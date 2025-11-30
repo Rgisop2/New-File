@@ -2,6 +2,7 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from helper.verification import VerificationManager
 from helper.helper_func import decode, get_messages, force_sub
+from plugins.shortner import get_short
 from config import LOGGER, OWNER_ID
 from datetime import datetime, timedelta
 import asyncio
@@ -47,12 +48,27 @@ async def start_with_verification(client: Client, message: Message):
         if status["current_step"] == 0:
             token_1 = await verification_manager.start_first_verification(file_id, user_id, client.mongodb)
             
+            verify_link = f"https://t.me/{client.username}?start=verify_{token_1}"
+            
+            short_link = await get_short_link(client, verify_link, verification_step=1)
+            
+            if not short_link:
+                await message.reply(
+                    "❌ <b>Shortener Failed</b>\n\n"
+                    "Unable to generate verification link. Please try again later."
+                )
+                return
+            
             await message.reply(
-                "<b>🔐 Verification Required (Step 1/2)</b>\n\n"
-                "To access this file, please verify through our shortener link.\n\n"
-                "<blockquote>Your verification code will be sent to you after clicking the button below.</blockquote>",
+                "<b>🔒 Verification Required (Step 1/2)</b>\n\n"
+                "Your verification code will be sent to you after clicking the button below.\n\n"
+                "<blockquote>This helps us protect your files.</blockquote>"
+            )
+            
+            await message.reply(
+                "Click the button below to verify:",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✓ Verify Now", url=f"https://t.me/{client.username}?start=verify_{token_1}")]
+                    [InlineKeyboardButton("✓ Verify Now", url=short_link)]
                 ])
             )
             return
@@ -61,19 +77,34 @@ async def start_with_verification(client: Client, message: Message):
         elif status["gap_expired"]:
             token_2 = await verification_manager.start_second_verification(file_id, user_id, client.mongodb)
             
+            verify_link = f"https://t.me/{client.username}?start=verify_{token_2}"
+            
+            short_link = await get_short_link(client, verify_link, verification_step=2)
+            
+            if not short_link:
+                await message.reply(
+                    "❌ <b>Shortener Failed</b>\n\n"
+                    "Unable to generate verification link. Please try again later."
+                )
+                return
+            
             await message.reply(
-                "<b>🔐 Second Verification Required (Step 2/2)</b>\n\n"
-                "Your temporary access has expired. Please verify once more:\n\n"
-                "<blockquote>This is your final verification for this session.</blockquote>",
+                "<b>🔒 Second Verification Required (Step 2/2)</b>\n\n"
+                "Your temporary access has expired. Please verify once more.\n\n"
+                "<blockquote>This is your final verification for this session.</blockquote>"
+            )
+            
+            await message.reply(
+                "Click the button below to verify:",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✓ Verify Now", url=f"https://t.me/{client.username}?start=verify_{token_2}")]
+                    [InlineKeyboardButton("✓ Verify Now", url=short_link)]
                 ])
             )
             return
         
         # ========== VERIFIED: SEND FILE ==========
         elif status["can_access_file"]:
-            # User is verified, proceed with normal file sending
+            # User is verified and accessing via normal file link, send file
             await send_file_with_verification(client, message, base64_payload, is_short_link, file_id, user_id)
             return
     
@@ -81,8 +112,24 @@ async def start_with_verification(client: Client, message: Message):
         client.LOGGER(__name__, client.name).warning(f"Verification start error: {e}")
 
 
+async def get_short_link(client: Client, url: str, verification_step: int = 1) -> str:
+    """
+    Helper to get shortened link with error handling
+    Returns shortened URL or None if failed
+    """
+    try:
+        from plugins.shortner import get_short
+        short_link = get_short(url, client, verification_step=verification_step)
+        return short_link
+    except Exception as e:
+        client.LOGGER(__name__, client.name).warning(f"Error shortening link: {e}")
+        return None
+
+
 async def handle_verification_token(client: Client, message: Message, user_id: int, payload: str):
-    """Handle verification token submission"""
+    """
+    Handle verification token submission - only accept valid unused tokens
+    """
     try:
         # Extract token from payload
         token = payload.split("_", 1)[1] if "_" in payload else None
@@ -91,28 +138,25 @@ async def handle_verification_token(client: Client, message: Message, user_id: i
             await message.reply("⚠️ Invalid verification token.")
             return
         
-        # Find the verification record for this user with this token
-        # Search for token_1 or token_2 matches
         ver_record = None
         async for doc in client.mongodb.user_data.find({
-            "_id": {"$regex": f"^verification_{user_id}"},
             "$or": [
-                {"token_1": token},
-                {"token_2": token}
+                {"token_1": token, "token_1_used": False},
+                {"token_2": token, "token_2_used": False}
             ]
         }):
             ver_record = doc
             break
         
         if not ver_record:
-            await message.reply("⚠️ Verification token not found or expired.")
+            await message.reply("⚠️ Verification token not found, expired, or already used.")
             return
         
-        file_id = ver_record["_id"].replace(f"verification_{user_id}_", "")
+        file_id = ver_record.get("file_id")
         current_step = ver_record.get("current_step", 0)
         
         # ========== VERIFY TOKEN 1 ==========
-        if current_step == 0 and ver_record.get("token_1") == token:
+        if current_step == 0 and ver_record.get("token_1") == token and not ver_record.get("token_1_used"):
             result = await verification_manager.verify_token_1(
                 file_id, user_id, token, gap_time_minutes=5, mongodb=client.mongodb
             )
@@ -129,7 +173,7 @@ async def handle_verification_token(client: Client, message: Message, user_id: i
                 await message.reply(f"❌ First verification failed: {result['message']}")
         
         # ========== VERIFY TOKEN 2 ==========
-        elif current_step == 1 and ver_record.get("token_2") == token:
+        elif current_step == 1 and ver_record.get("token_2") == token and not ver_record.get("token_2_used"):
             result = await verification_manager.verify_token_2(file_id, user_id, token, mongodb=client.mongodb)
             
             if result["success"]:
@@ -143,7 +187,7 @@ async def handle_verification_token(client: Client, message: Message, user_id: i
                 await message.reply(f"❌ Second verification failed: {result['message']}")
         
         else:
-            await message.reply("⚠️ Token verification not possible at this stage.")
+            await message.reply("⚠️ Token verification not possible at this stage or token has been used.")
     
     except Exception as e:
         client.LOGGER(__name__, client.name).warning(f"Verification token handler error: {e}")
