@@ -14,7 +14,7 @@ class VerificationManager:
     async def initialize_verification_for_file(self, file_id: str, user_id: int, mongodb: MongoDB):
         """Initialize verification record for a file access"""
         verification_data = {
-            "_id": f"{user_id}_{file_id}",
+            "_id": f"verification_{user_id}_{file_id}",
             "user_id": user_id,
             "file_id": file_id,
             "current_step": 0,
@@ -49,6 +49,8 @@ class VerificationManager:
             {"_id": f"verification_{user_id}_{file_id}"},
             {
                 "$set": {
+                    "user_id": user_id,
+                    "file_id": file_id,
                     "token_1": token_1,
                     "token_1_used": False,
                     "current_step": 0,
@@ -70,20 +72,14 @@ class VerificationManager:
             "gap_end": datetime
         }
         """
-        ver_doc = await mongodb.user_data.find_one({"_id": f"verification_{user_id}_{file_id}"})
+        ver_doc = await mongodb.user_data.find_one({"token_1": token, "token_1_used": False})
         
         if not ver_doc:
-            return {"success": False, "message": "Verification record not found"}
+            return {"success": False, "message": "Verification record not found or token already used"}
         
-        # Check if token matches
-        if ver_doc.get("token_1") != token:
-            return {"success": False, "message": "Invalid token"}
-        
-        # Check if token has been used
         if ver_doc.get("token_1_used"):
             return {"success": False, "message": "Token already used"}
         
-        # Check if current_step is 0
         if ver_doc.get("current_step") != 0:
             return {"success": False, "message": "Invalid verification state"}
         
@@ -92,7 +88,7 @@ class VerificationManager:
         
         # Update verification record
         await mongodb.user_data.update_one(
-            {"_id": f"verification_{user_id}_{file_id}"},
+            {"_id": ver_doc["_id"]},
             {
                 "$set": {
                     "token_1_used": True,
@@ -137,26 +133,20 @@ class VerificationManager:
             "current_step": int
         }
         """
-        ver_doc = await mongodb.user_data.find_one({"_id": f"verification_{user_id}_{file_id}"})
+        ver_doc = await mongodb.user_data.find_one({"token_2": token, "token_2_used": False})
         
         if not ver_doc:
-            return {"success": False, "message": "Verification record not found"}
+            return {"success": False, "message": "Verification record not found or token already used"}
         
-        # Check if token matches
-        if ver_doc.get("token_2") != token:
-            return {"success": False, "message": "Invalid token"}
-        
-        # Check if token has been used
         if ver_doc.get("token_2_used"):
             return {"success": False, "message": "Token already used"}
         
-        # Check if current_step is 1
         if ver_doc.get("current_step") != 1:
             return {"success": False, "message": "Invalid verification state"}
         
         # Update verification record
         await mongodb.user_data.update_one(
-            {"_id": f"verification_{user_id}_{file_id}"},
+            {"_id": ver_doc["_id"]},
             {
                 "$set": {
                     "token_2_used": True,
@@ -175,6 +165,7 @@ class VerificationManager:
     async def check_verification_status(self, file_id: str, user_id: int, mongodb: MongoDB, gap_time_minutes: int = 0) -> dict:
         """
         Check current verification status and determine next action
+        Only checks user's own verification records
         
         Returns: {
             "current_step": int,  # 0 = no verification, 1 = first verified, 2 = fully verified
@@ -186,7 +177,9 @@ class VerificationManager:
             "token_2": str (if needed)
         }
         """
-        ver_doc = await mongodb.user_data.find_one({"_id": f"verification_{user_id}_{file_id}"})
+        ver_doc = await mongodb.user_data.find_one({
+            "_id": f"verification_{user_id}_{file_id}"
+        })
         
         if not ver_doc:
             # No record, needs first verification
